@@ -18,8 +18,8 @@ const SAVE_KEY = 'hanafuda/save-v1';
 const load = <T,>(k: string): T | null => { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : null; } catch { return null; } };
 const store = (k: string, v: unknown) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch { /* 保存できない */ } };
 
-interface Settings { level: Level; months: number; render: '3d' | '2d'; opts: Options }
-const settings: Settings = { level: 'normal', months: 6, render: '3d', ...(load<Partial<Settings>>(SETTINGS_KEY) ?? {}), opts: { ...DEFAULT_OPTIONS, ...(load<Settings>(SETTINGS_KEY)?.opts ?? {}) } };
+interface Settings { level: Level; months: number; render: '3d' | '2d'; fx: 'full' | 'lite'; opts: Options }
+const settings: Settings = { level: 'normal', months: 6, render: '3d', fx: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'lite' : 'full', ...(load<Partial<Settings>>(SETTINGS_KEY) ?? {}), opts: { ...DEFAULT_OPTIONS, ...(load<Settings>(SETTINGS_KEY)?.opts ?? {}) } };
 const saveSettings = () => store(SETTINGS_KEY, settings);
 
 // ---------- 対局の相手（コンピューター・オンライン）を同じ形で扱う ----------
@@ -59,12 +59,12 @@ function cpuDriver(level: Level, opts: Options, saved: State | null, onView: (v:
 
 // ---------- 対局の画面 ----------
 type Table = Table3D | Table2D;
-interface Game { driver: Driver; table: Table; view: View | null; selected: number | null; cheer: number; supporters: number; modal: string | null; shown: number }
+interface Game { finaleDone: boolean; pendingYaku: Extract<Ev, { k: 'yaku' }> | null; driver: Driver; table: Table; view: View | null; selected: number | null; cheer: number; supporters: number; modal: string | null; shown: number }
 let game: Game | null = null;
 const SPEED = new URLSearchParams(location.search).has('fast') ? 0.05 : 1; // 画面テスト用
 
 function makeTable(): Table {
-  if (settings.render === '3d') { const t = Table3D.create(); if (t) return t; toast('3D 表示が使えないため、2D で表示します'); }
+  if (settings.render === '3d') { const t = Table3D.create(); if (t) { t.setLite(settings.fx === 'lite'); return t; } toast('3D 表示が使えないため、2D で表示します'); }
   return new Table2D();
 }
 
@@ -73,7 +73,7 @@ export function startGame(make: (onView: (v: View) => void) => Driver) {
   game?.table.destroy();
   const table = makeTable();
   table.speed = SPEED;
-  const g: Game = { driver: null as unknown as Driver, table, view: null, selected: null, cheer: 0, supporters: 1200, modal: null, shown: -1 };
+  const g: Game = { finaleDone: false, pendingYaku: null, driver: null as unknown as Driver, table, view: null, selected: null, cheer: 0, supporters: 1200, modal: null, shown: -1 };
   game = g;
   table.onPick = (id) => onPick(g, id);
   renderGameShell(g);
@@ -88,6 +88,7 @@ function onView(g: Game, v: View) {
   void g.table.update(v, {
     onEvent: (ev) => onEvent(g, ev, v),
     onSound: (s) => sound(s),
+    onCue: (name) => { if (name === 'yaku' && g.pendingYaku) { const y = g.pendingYaku; g.pendingYaku = null; yakuBanner(g, y); } },
   }).then(() => {
     if (game !== g || g.view !== v) return;
     refresh(g);
@@ -104,19 +105,21 @@ function onEvent(g: Game, ev: Ev | { k: 'deal'; round: number; dealer: Player },
     case 'deal': {
       const last = ev.round >= v.opts.months;
       g.table.setMood(last ? 'final' : g.cheer > 0.85 ? 'cheer' : 'normal');
-      banner(`第 ${ev.round} 月`, `親：${nm(ev.dealer)}`);
-      if (last) setTimeout(() => { banner('最終決戦', `${v.opts.months} 月目・これが最後の勝負`, 'final'); sound('final'); }, 900 * SPEED);
+      if (!last) { banner(`第 ${ev.round} 月`, `親：${nm(ev.dealer)}`, '', 'slash'); break; }
+      // 最終決戦：カウントダウン
+      ['3', '2', '1'].forEach((n, i) => setTimeout(() => { if (game === g) { banner(n, '', 'final', 'count'); sound('count'); sound('beat'); } }, i * 520 * SPEED));
+      setTimeout(() => { if (game === g) { banner('最終決戦', `${v.opts.months} 月目・これが最後の勝負`, 'final', 'slash'); sound('final'); } }, 1560 * SPEED);
       break;
     }
     case 'yaku':
-      banner(ev.yaku.map((y) => y.name).join('・'), `${nm(ev.p)}　${ev.base} 点`, ev.p === me ? 'gold' : 'red');
-      sound('yaku');
+      // 3D は演出の決めの瞬間（合図）に文字を出す。2D はすぐ出す
+      if (g.table instanceof Table3D) g.pendingYaku = ev; else { yakuBanner(g, ev); sound('yaku'); }
       g.table.doPulse();
       if (ev.p === me) bumpCheer(g, 0.25);
       break;
     case 'koikoi':
-      banner('こいこい！', `${nm(ev.p)}が勝負を続けます`, ev.p === me ? 'gold' : 'red');
-      sound('koikoi');
+      banner('こいこい！', `${nm(ev.p)}が勝負を続けます`, ev.p === me ? 'gold' : 'red', 'break');
+      if (!(g.table instanceof Table3D)) sound('koikoi');
       g.table.doBurst();
       if (ev.p === me) bumpCheer(g, 0.15);
       break;
@@ -125,6 +128,7 @@ function onEvent(g: Game, ev: Ev | { k: 'deal'; round: number; dealer: Player },
       break;
     case 'end': {
       const r = ev.result;
+      if (r.winner != null && r.reason === 'stop') banner('勝負！', `${nm(r.winner)}の上がり`, r.winner === me ? 'gold' : 'red', 'break');
       if (r.winner === me) sound('win'); else if (r.winner != null) sound('lose');
       break;
     }
@@ -197,6 +201,7 @@ const matchesIn = (v: View, card: number) => v.field.filter((f) => f >> 2 === ca
 function refresh(g: Game) {
   const v = g.view;
   if (!v) return;
+  if (v.phase !== 'over') g.finaleDone = false;
   refreshPlates(g);
   const me = g.driver.me;
   const myTurn = v.turn === me && v.legal.length > 0;
@@ -304,13 +309,21 @@ function showRoundEnd(g: Game) {
     r.yaku.length ? yakuList(r.yaku) : null,
     r.winner != null ? h('p', { class: 'pts' }, `${r.base} 点${r.doubles.length ? ` → ${r.doubles.join('・')} → ` : ' → '}`, h('b', {}, `${r.points} 点`)) : null,
     h('p', { class: 'scores' }, `あなた ${v.scores[me]} 点 ／ ${g.driver.names[1 - me]} ${v.scores[1 - me]} 点`),
-    h('div', { class: 'btns' }, h('button', { class: 'btn big primary', id: 'next', onclick: (e: Event) => { (e.currentTarget as HTMLButtonElement).disabled = true; g.driver.send({ type: 'next' }); } }, last ? '結果を見る' : '次の月へ')));
+    h('div', { class: 'btns' }, h('button', { class: 'btn big primary', id: 'next', onclick: (e: Event) => { (e.currentTarget as HTMLButtonElement).disabled = true; if (!last) closeModal(); g.driver.send({ type: 'next' }); } }, last ? '結果を見る' : '次の月へ')));
 }
 
 function showOver(g: Game) {
   const v = g.view!;
   const me = g.driver.me;
   const win = v.scores[me] > v.scores[1 - me], draw = v.scores[me] === v.scores[1 - me];
+  if (g.modal !== 'over' && !g.finaleDone) {
+    g.finaleDone = true;
+    if (g.table instanceof Table3D) void g.table.finale(win);
+    banner(draw ? '引き分け' : win ? '完全勝利' : '敗北', '', win ? 'gold' : 'red', 'slash');
+    setTimeout(() => { if (game === g && g.view?.phase === 'over') { g.modal = null; showOver(g); } }, 1800 * SPEED);
+    g.modal = 'over-wait';
+    return;
+  }
   modal('over',
     h('h2', { class: `big ${win ? 'win' : draw ? '' : 'lose'}` }, draw ? '引き分け' : win ? 'あなたの勝ち！' : 'あなたの負け'),
     h('p', { class: 'scores' }, `あなた ${v.scores[me]} 点 ／ ${g.driver.names[1 - me]} ${v.scores[1 - me]} 点`),
@@ -335,12 +348,25 @@ function showCaptured(g: Game) {
 }
 
 // ---------- 大きな文字の演出 ----------
-function banner(text: string, sub = '', kind: '' | 'gold' | 'red' | 'final' = '') {
+// style：slash＝斬り込む、break＝突き破る、count＝数字、yaku＝一文字ずつ
+function banner(text: string, sub = '', kind: '' | 'gold' | 'red' | 'final' = '', style: '' | 'slash' | 'break' | 'count' | 'yaku' = '') {
   const box = document.querySelector('.banners');
-  if (!box) return;
-  const el = h('div', { class: `banner ${kind}` }, h('div', { class: 'bt' }, text), sub ? h('div', { class: 'bs' }, sub) : null);
+  if (!box) return null;
+  const chars = [...text].map((ch, i) => h('span', { style: { '--d': `${i * 0.06}s` } }, ch));
+  const el = h('div', { class: `banner ${kind} ${style} ${settings.fx === 'lite' ? 'lite' : ''}` }, h('div', { class: 'bt', 'data-text': text }, chars), sub ? h('div', { class: 'bs' }, sub) : null);
   box.append(el);
-  setTimeout(() => el.remove(), Math.max(400, 2200 * SPEED));
+  setTimeout(() => el.remove(), Math.max(400, (style === 'count' ? 600 : style === 'yaku' ? 2600 : 2200) * SPEED));
+  return el;
+}
+function yakuBanner(g: Game, ev: Extract<Ev, { k: 'yaku' }>) {
+  const me = g.driver.me;
+  const who = ev.p === me ? 'あなた' : g.driver.names[ev.p];
+  const el = banner(ev.yaku.map((y) => y.name).join('・'), `${who}　0 点`, ev.p === me ? 'gold' : 'red', 'yaku');
+  const sub = el?.querySelector('.bs');
+  if (!sub) return;
+  let n = 0;
+  const step = () => { n++; sub.textContent = `${who}　${n} 点`; if (n < ev.base) setTimeout(step, Math.max(10, 90 * SPEED)); };
+  setTimeout(step, 250 * SPEED);
 }
 function toast(text: string) {
   const el = h('div', { class: 'toast', role: 'alert' }, text);
@@ -378,6 +404,7 @@ function showTitle() {
         h('button', { class: 'btn big', id: 'online', onclick: () => showOnline() }, '合言葉で対戦する')),
       h('section', { class: 'panel' },
         h('h2', {}, '設定'),
+        h('div', { class: 'chips' }, chip<Settings['fx']>('fx', settings.fx, 'full', '演出：派手', (v) => { settings.fx = v; }), chip<Settings['fx']>('fx', settings.fx, 'lite', '演出：控えめ', (v) => { settings.fx = v; })),
         h('div', { class: 'chips' }, chip<Settings['render']>('render', settings.render, '3d', '3D 表示', (v) => { settings.render = v; }), chip<Settings['render']>('render', settings.render, '2d', '2D 表示（軽い）', (v) => { settings.render = v; })),
         h('div', { class: 'checks' },
           check('drinks', '花見で一杯・月見で一杯'), check('sakeAsKasu', '菊に盃をカスにも数える'),

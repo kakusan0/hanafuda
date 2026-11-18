@@ -77,7 +77,7 @@ async function playThrough(page, { months = 3, maxSteps = 400, koikoiOnce = fals
 }
 
 for (const [label, ctxOpts] of [['PC', { viewport: { width: 1280, height: 800 } }], ['スマホ', devices['iPhone 13']]]) {
-  for (const render of ['3d', '2d']) {
+  for (const render of label === 'PC' ? ['3d', '2d', '3d-lite'] : ['3d', '2d']) {
     const ctx = await browser.newContext(ctxOpts);
     const page = await ctx.newPage();
     const errs = [];
@@ -85,7 +85,7 @@ for (const [label, ctxOpts] of [['PC', { viewport: { width: 1280, height: 800 } 
     page.on('console', (m) => { if (m.type() === 'error' && !/WebSocket|Failed to load resource|fonts/.test(m.text())) errs.push(m.text()); });
     page.on('dialog', (d) => d.accept());
     await page.goto(`${BASE}/?fast`);
-    await page.evaluate((r) => localStorage.setItem('hanafuda/settings-v1', JSON.stringify({ level: 'normal', months: 3, render: r })), render);
+    await page.evaluate((r) => localStorage.setItem('hanafuda/settings-v1', JSON.stringify({ level: 'normal', months: 3, render: r.replace('-lite', ''), fx: r.endsWith('lite') ? 'lite' : 'full' })), render);
     const tag = `${label}・${render.toUpperCase()}`;
 
     await step(`${tag}：タイトル`, async () => {
@@ -97,7 +97,7 @@ for (const [label, ctxOpts] of [['PC', { viewport: { width: 1280, height: 800 } 
 
     await step(`${tag}：3 か月を最後までタップで遊ぶ（こいこいも）`, async () => {
       await page.click('#start-cpu');
-      if (render === '3d') {
+      if (render.startsWith('3d')) {
         await page.locator('canvas.stage').waitFor();
         // WebGL で描けている（真っ黒ではない）
         await page.waitForTimeout(400);

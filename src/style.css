@@ -180,3 +180,46 @@ button.card2d { cursor: pointer; }
 .deck-list figure img { width: 100%; border-radius: 4px; }
 body:has(.rules) { background: radial-gradient(ellipse at 50% 0%, #12245a 0%, #05070f 60%) fixed; }
 .link { color: var(--accent); }
+
+/* 文字の演出（躍動感） */
+.banner .bt span { display: inline-block; }
+.banner.slash { animation: none; }
+.banner.slash .bt { position: relative; animation: slashIn 2.2s cubic-bezier(.15, .9, .2, 1) forwards; }
+.banner.slash .bt::after { content: ''; position: absolute; left: -20%; right: -20%; top: 50%; height: 4px; background: linear-gradient(90deg, transparent, #fff, transparent); box-shadow: 0 0 18px #fff; transform: scaleX(0); animation: slashLine .5s ease-out forwards; }
+@keyframes slashIn {
+  0% { opacity: 0; transform: translateX(-60vw) skewX(-35deg); filter: blur(8px); }
+  12% { opacity: 1; transform: translateX(3vw) skewX(10deg); filter: blur(0); }
+  18% { transform: translateX(0) skewX(0); }
+  80% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(20vw) skewX(-20deg); filter: blur(6px); }
+}
+@keyframes slashLine { 0% { transform: scaleX(0); opacity: 1; } 60% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1.3); opacity: 0; } }
+.banner.break { animation: breakIn 2.2s cubic-bezier(.2, 1.6, .3, 1) forwards; }
+@keyframes breakIn {
+  0% { opacity: 0; transform: scale(.15) rotate(-14deg); }
+  10% { opacity: 1; transform: scale(1.35) rotate(4deg); }
+  14% { transform: scale(.92) rotate(-2deg) translate(6px, -4px); }
+  18% { transform: scale(1.05) rotate(1deg) translate(-5px, 3px); }
+  24% { transform: scale(1) rotate(0); }
+  82% { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 0; transform: scale(1.6); filter: blur(8px); }
+}
+.banner.break .bt { animation: chroma .6s steps(6) 1; }
+.banner.count { animation: countIn .6s cubic-bezier(.1, .9, .2, 1) forwards; }
+.banner.count .bt { font-size: clamp(90px, 28vw, 240px); }
+@keyframes countIn { 0% { opacity: 0; transform: scale(3); filter: blur(12px); } 25% { opacity: 1; transform: scale(1); filter: blur(0); } 100% { opacity: 0; transform: scale(.6); } }
+.banner.yaku { animation: yakuHold 2.6s linear forwards; }
+.banner.yaku .bt span { opacity: 0; animation: charIn .5s cubic-bezier(.2, 1.5, .3, 1) forwards; animation-delay: var(--d); }
+.banner.yaku .bt { animation: chroma .8s steps(8) .1s 1; }
+.banner.yaku .bs { font-size: clamp(18px, 5vw, 30px); color: var(--gold); font-variant-numeric: tabular-nums; }
+@keyframes yakuHold { 0%, 85% { opacity: 1; } 100% { opacity: 0; transform: scale(1.15); filter: blur(6px); } }
+@keyframes charIn { 0% { opacity: 0; transform: translateY(-60px) scale(2.4) rotate(-20deg); filter: blur(6px); } 60% { opacity: 1; transform: translateY(6px) scale(.9); filter: blur(0); } 100% { opacity: 1; transform: none; } }
+@keyframes chroma {
+  0%, 100% { filter: none; }
+  20% { filter: drop-shadow(-5px 0 0 rgba(255, 0, 70, .8)) drop-shadow(5px 0 0 rgba(0, 220, 255, .8)); }
+  50% { filter: drop-shadow(3px 1px 0 rgba(255, 0, 70, .7)) drop-shadow(-3px -1px 0 rgba(0, 220, 255, .7)); }
+  80% { filter: drop-shadow(-1px 0 0 rgba(255, 0, 70, .5)) drop-shadow(1px 0 0 rgba(0, 220, 255, .5)); }
+}
+.banner.lite, .banner.lite .bt, .banner.lite .bt span { animation: fadeQuick 1.6s ease forwards !important; opacity: 1; }
+@keyframes fadeQuick { 0% { opacity: 0; } 15%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .title::before, .title-bg img { animation: none; } }
