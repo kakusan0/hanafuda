@@ -23,7 +23,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
 // 札をタップする（3D でも 2D でも、画面上の位置を聞いて押す）
 async function tapCard(page, id) {
-  const pos = await page.evaluate((i) => window.__hana.screenOf(i), id);
+  let pos = null;
+  for (let k = 0; k < 30 && !pos; k++) { pos = await page.evaluate((i) => window.__hana.screenOf(i), id); if (!pos) await page.waitForTimeout(100); }
   assert(pos, `札 ${id} が見つからない`);
   const box = await page.locator('.stage, .table2d').first().boundingBox();
   await page.mouse.click(box.x + pos[0] * box.width, box.y + pos[1] * box.height);
@@ -32,27 +33,45 @@ async function tapCard(page, id) {
 // 自分の番が来たら、選べる手の 1 つ目をタップで指す。最後まで（または max 手）
 async function playThrough(page, { months = 3, maxSteps = 400, koikoiOnce = false } = {}) {
   let koikoiDone = false;
+  const misses = {};
   let sawKoikoi = false;
   for (let i = 0; i < maxSteps; i++) {
     await page.waitForFunction(() => window.__hana.ready() || document.querySelector('.modal'), null, { timeout: 30000 });
     const v = await page.evaluate(() => window.__hana.view());
     if (v.phase === 'over') { await page.locator('[data-modal="over"]').waitFor(); return { v, sawKoikoi }; }
-    if (v.phase === 'roundEnd') { await page.click('#next'); await page.waitForFunction((r) => window.__hana.view().round !== r || window.__hana.view().phase === 'over', v.round); continue; }
+    if (v.phase === 'roundEnd') { await page.click('#next', { timeout: 8000 }).catch(async () => { throw new Error(`次へが押せない modal=${await page.evaluate(() => document.querySelector('.modal')?.dataset.modal)}`); }); await page.waitForFunction((r) => window.__hana.view().round !== r || window.__hana.view().phase === 'over', v.round); continue; }
     if (v.turn !== v.me || !v.legal.length) { await page.waitForFunction((s) => window.__hana.view().seq !== s, v.seq, { timeout: 30000 }); continue; }
     if (v.phase === 'koikoi') {
       sawKoikoi = true;
-      if (koikoiOnce && !koikoiDone) { koikoiDone = true; await page.click('#koikoi'); } else await page.click('#stop');
+      const sel = koikoiOnce && !koikoiDone ? '#koikoi' : '#stop';
+      if (sel === '#koikoi') koikoiDone = true;
+      await page.click(sel, { timeout: 8000 }).catch(async () => { throw new Error(`${sel} が押せない modal=${await page.evaluate(() => document.querySelector('.modal')?.dataset.modal)} seq=${v.seq}`); });
     } else if (v.phase === 'drawChoose') {
       await tapCard(page, v.legal[0].target);
     } else {
       const a = v.legal[0];
       await tapCard(page, a.card);
       const m = v.field.filter((f) => f >> 2 === a.card >> 2);
-      if (m.length === 0) await page.click('#discard');
+      if (m.length === 0) {
+        const ok = await page.click('#discard', { timeout: 3000 }).then(() => true, () => false);
+        if (!ok) {
+          const info = await page.evaluate((id) => ({ pos: window.__hana.screenOf(id), msg: document.querySelector('.msg')?.textContent, at: (() => { const p = window.__hana.screenOf(id); const el = document.elementFromPoint(p[0] * innerWidth, p[1] * innerHeight); return el?.className || el?.tagName; })() }), a.card);
+          console.log('選べなかった', a.card, JSON.stringify(info));
+          misses[v.seq] = (misses[v.seq] ?? 0) + 1;
+          if (misses[v.seq] < 3) continue;
+          throw new Error(`場に出すが出ない ${JSON.stringify(info)}`);
+        }
+      }
       else if (m.length === 2) await tapCard(page, a.target);
       else await tapCard(page, a.card);
     }
-    await page.waitForFunction((s) => window.__hana.view().seq !== s, v.seq, { timeout: 10000 });
+    try { await page.waitForFunction((s) => window.__hana.view().seq !== s, v.seq, { timeout: 4000 }); }
+    catch {
+      // 動きの途中で押してしまったときは、もう一度（同じ局面で 3 回まで）
+      misses[v.seq] = (misses[v.seq] ?? 0) + 1;
+      if (misses[v.seq] < 3) { await page.evaluate(() => document.querySelector('.modal [data-close]')?.click()); continue; }
+      throw new Error(`進まない：${v.phase} ${JSON.stringify(v.legal[0])} field=${v.field} hand=${v.hand} sel=${await page.evaluate(() => document.querySelector('.msg')?.textContent)} modal=${await page.evaluate(() => document.querySelector('.modal')?.dataset.modal)}`);
+    }
   }
   throw new Error('終わらない');
 }

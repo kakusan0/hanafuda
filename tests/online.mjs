@@ -136,7 +136,9 @@ await step('ブラウザ 2 つで部屋を作って入り、1 か月遊ぶ', asy
     await pb.goto(`${BASE}/?fast&room=${code}`);
     for (const p of [pa, pb]) await p.waitForFunction(() => window.__hana?.view?.(), null, { timeout: 15000 });
     const tap = async (p, id) => {
-      const pos = await p.evaluate((i) => window.__hana.screenOf(i), id);
+      let pos = null;
+      for (let n = 0; n < 30 && !pos; n++) { pos = await p.evaluate((i) => window.__hana.screenOf(i), id); if (!pos) await p.waitForTimeout(100); }
+      if (!pos) throw new Error(`札 ${id} が見つからない`);
       const box = await p.locator('.stage, .table2d').first().boundingBox();
       await p.mouse.click(box.x + pos[0] * box.width, box.y + pos[1] * box.height);
     };

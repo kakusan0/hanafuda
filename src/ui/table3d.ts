@@ -273,10 +273,8 @@ export class Table3D {
   // 札の画面上の中心（0〜1）。画面テストで使う
   screenOf(id: number): [number, number] | null {
     const o = this.obj(id);
-    if (!o) return null;
-    const c = this.corners(o);
-    if (!c) return null;
-    return [(c[0][0] + c[2][0]) / 2, (c[0][1] + c[2][1]) / 2];
+    if (!o || !this.vp.length) return null;
+    return project(this.vp, this.poseNow(o).p);
   }
 
   private pick(e: PointerEvent) {
