@@ -185,6 +185,12 @@ export class Table3D {
     }
   }
 
+  // すべての札が止まるまで待つ（配り終わる前に押せないように）
+  private async settle(limitMs = 4000) {
+    const end = performance.now() + limitMs;
+    while (performance.now() < end && this.objs.some((o) => o.tween && this.t < o.tween.t0 + o.tween.dur)) await sleep(30);
+  }
+
   private poseNow(o: Obj): Pose {
     const tw = o.tween;
     if (!tw) return o.cur;
@@ -318,12 +324,13 @@ export class Table3D {
         // 途中から見る（つなぎ直しなど）：いまの状態をそのまま出す
         this.place(0.5, 0.02);
         this.seenEvents = v.events.length;
-        await S(700);
+        await this.settle();
         return;
       }
       this.place(0.5, 0.035);
       this.seenEvents = v.events.length;
-      await S(900);
+      await S(300);
+      await this.settle();
       return;
     }
     const evs = v.events.slice(this.seenEvents);
@@ -333,6 +340,7 @@ export class Table3D {
     this.rebuild(v);
     this.place(0.4);
     await S(300);
+    await this.settle();
   }
 
   private async animate(ev: Ev, v: View, hooks: EventHooks) {
